@@ -1,0 +1,217 @@
+CForth API definitions
+=======================
+
+Cforth is designed to be extended using a port.
+
+The F3 Gizmo port, for instance, provides access to the peripherals of the  microcontroller and board chips in the STM32F3 Discovery board.
+
+The CFoth API provides a way to add new words inside CForth. This is different from normal Forth expansion as the new words are not written in CForth language but in C.
+
+To expand the CForth engine you need to modify two CForth port files:
+fp_portDictionary.h and fp_modules.h
+
+
+fp_portDictionary.h
+--------------------
+
+fp_portDictionary.h contains one line for each new word definition we want to add. This is the format it must use:
+
+{"WORD_NAME","Help Comment",function,code,flags},
+
+Where:
+
+  "WORD_NAME" Is the name of the new defined word
+
+              If it's all in uppercase all the letters must be written
+              (in uppercase, lower case or mixed) to call the word.
+
+              If it's mixed with uppercase and lowercase letters the 
+              word could be called using its all its letters (in any case)
+              or using only the upper case letters (in any case)
+
+              For instance "MYCOMMAND" can be called as:
+                 MyCommand mycommand MYCOMMAND ....
+
+              "MyCommand" can be called as all the above and:
+                 MC Mc mC
+
+              Beware not to use words with names that can conflict
+              with already existing words.
+                            
+
+  "Help Comment" Is the comment we will get using the WH command
+                 Two characters are special meanings:
+
+                 # Adds a newline for more than one line help
+                   The end of help newline don't need to be added
+
+                 $ Adds the string " -- " for stack diagrams.
+      
+  function Is the command function to be called when running this word
+  
+  code Is a code number that is given to the command function word when 
+       it is called. That way a function can support several new words.
+        
+  flags CForth specific flags.
+        For port words it should always be zero. 
+   
+ 
+As an example, the QUIT word is defined using the following line inside fp_portDictionay.h                         
+
+      {"QUIT","Exit from CForth",quitCForth,0,0},
+
+
+fp_modules.h
+--------------
+
+This file contains all the #include preprocessor directives needed so that the command function prototypes used inside fp_portDictionay.h can be found by the compiler.
+
+As an example, if the file contains the line:
+
+      {"QUIT","Exit from CForth",quitCForth,0,0},
+
+Then, there has to be a header file #include directive that links to a header file that includes:
+
+int32_t quitCForth(ContextType *context,int32_t value);
+
+
+
+
+Command function
+-----------------
+
+It must have the following format:
+
+
+int32_t function(ContextType *context,int32_t value)
+
+Where: context is an opaque type you should not mess
+               with its contents.
+
+value: Is the code number included in the word definition line
+       inside fp_portDictionay.h
+
+The command function returns a signed 32 bit number.
+This number is not used in the current CFoth version but to maintain future compatibility it should return always zero.
+
+
+==========
+CForh API
+==========
+
+The CForth API is the set of functions that the command function could call to interact with the CForth engine.
+As CForth is a stack based language, most of these functions access the stack.
+
+For each function you must include the header file of the module where the function is defined. You should also include the following header preprocessor include directives:
+
+#include "fp_config.h"         // Main configuration file
+#include "fp_port.h"           // Main port definitions
+#include "fm_main.h"           // Main forth header file
+
+
+Parameter Stack Functions
+--------------------------
+
+To use those functions you need to include fm_stack.h
+
+void PstackInit(ContextType *context);
+Clears the parameter stack
+
+void PstackPush(ContextType *context,int32_t value)
+Introduces a number Value on one the parameter stack
+As the parameter stack is circular, it never fails
+
+int32_t PstackPop(ContextType *context,int32_t *value)
+Takes one element from the parameter stack of the context and puts it in the position pointed by value
+Returns 0 if there is no error
+
+int32_t PstackGetSize(ContextType *context)
+Gets the number of items in the parameter stack
+
+int32_t PstackGetTop(ContextType *context,int32_t *value)
+Gets the Parameter Stack top without popping it
+Returns 0 if OK
+        1 if empty
+
+If any of the above words give error, an error message will be shown in the console and the abort process will start.
+
+
+Return Stack Functions
+-----------------------
+
+To use those functions you need to include fm_stack.h
+
+void RstackInit(ContextType *context)
+Clears the return stack.
+In general you should not call this function if you don't know what you are doing as this stack is used for several CForth internal operations.
+
+int32_t RstackPush(ContextType *context,int32_t value)
+Introduces a number on the return stack
+Returns 0 if ok
+        1 if overflows
+
+int32_t RstackPop(ContextType *context,int32_t *value)
+Takes one element from the return stack and stores its content in the position pointed by value
+Returns 0 if there is no error
+
+int32_t RstackGetSize(ContextType *context)
+Gets the number of items in the return stack
+
+int32_t RstackGetTop(ContextType *context,int32_t *value)
+Gets the Return Stack top without popping it
+Returns 0 if OK
+        1 if empty
+
+If any of the above words give error, an error message will be shown in the console and the abort process will start.
+
+
+
+Word errors
+------------
+
+To use this function you need to include fm_screen.h
+
+void runtimeErrorMessage(ContextType *context,char *cad)
+Writes the error message pointed by cad in the console with the "RUN ERROR: " prefix.
+It also starts the abort process so use it for non recoverable errors.
+
+
+
+Writing on the console
+-----------------------
+
+As the console write functions are provided by the port, you don't need to use the API to write on the console.
+The Verbose context variable, however, limits the data that should arrive to the console. If you want to write on the console you should check that you are allowed by using the following macros:
+
+NO_ERROR(context)      Returns TRUE if you are not allowed to show errors
+SHOW_ERROR(context)    Returns TRUE if you are allowed to show errors      
+
+NO_RESPONSE(context)    Returns TRUE if you are not allowed to show word output
+SHOW_RESPONSE(context)  Returns TRUE if you are allowed to show word output    
+
+SHOW_INFO(context)     Returns TRUE if you are not allowed to show word info
+NO_INFO(context)       Returns TRUE if you are allowed to show word info
+
+The difference between RESPONSE and INFO is the following:
+
+  RESPONSE is related to console outputs needed for the word operation
+           For instance .S shows the stack contents and they should not be shown is
+           NO_RESPONSE gives TRUE.
+
+  INFO is related to console output not needed for the word operations
+       For instace, the SAVE words indicates when flash pages are cleared but this
+       information is not needed for word operation.
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
